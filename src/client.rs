@@ -41,13 +41,14 @@ pub struct ApiClient {
     pub octocrab: Arc<octocrab::Octocrab>,
     pub http: Client,
     pub artifact: ArtifactClient,
+    github_token: String,
 }
 
 impl ApiClient {
     pub fn new(repository: Repository, github_token: String) -> Result<Self> {
         let octocrab = Arc::new(
             octocrab::OctocrabBuilder::new()
-                .personal_token(github_token)
+                .personal_token(github_token.clone())
                 .build()
                 .context("build octocrab")?,
         );
@@ -61,6 +62,7 @@ impl ApiClient {
             octocrab,
             http,
             artifact,
+            github_token,
         })
     }
 
@@ -137,22 +139,36 @@ impl ApiClient {
     }
 
     /// Workflow run artifact を zip でダウンロードする (REST API 経由)。
+    ///
+    /// The REST endpoint responds with a 302 redirect to a temporary blob
+    /// URL; `octocrab._get` does NOT follow that redirect, so calling it
+    /// directly returns an empty body. Use the `reqwest` client which
+    /// follows redirects (and strips Authorization on cross-origin, which
+    /// the blob URL requires) to fetch the actual zip bytes.
     pub async fn download_artifact_zip(&self, artifact_id: u64) -> Result<Bytes> {
-        let owner = self.repository.owner.clone();
-        let repo = self.repository.repo.clone();
-        let octo = self.octocrab.clone();
-        let url = format!("/repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip");
-        let resp = (|| async { octo._get(url.clone()).await })
-            .retry(Self::backoff())
-            .await
-            .context("downloadArtifact")?;
-        // フォロー先 URL の本体を取得
-        let bytes = resp
-            .into_body()
-            .collect()
-            .await
-            .context("collect download body")?
-            .to_bytes();
+        let owner = &self.repository.owner;
+        let repo = &self.repository.repo;
+        let url = format!(
+            "https://api.github.com/repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip"
+        );
+        let bytes = (|| async {
+            self.http
+                .get(&url)
+                .header(AUTHORIZATION, format!("Bearer {}", self.github_token))
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "reg-actions")
+                .send()
+                .await
+                .context("send artifact request")?
+                .error_for_status()
+                .context("artifact response status")?
+                .bytes()
+                .await
+                .context("read artifact body")
+        })
+        .retry(Self::backoff())
+        .await?;
         Ok(bytes)
     }
 
