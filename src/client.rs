@@ -16,7 +16,6 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use backon::{ExponentialBuilder, Retryable};
 use bytes::Bytes;
-use http_body_util::BodyExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
