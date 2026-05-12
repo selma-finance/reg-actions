@@ -78,15 +78,18 @@ runs:
     - name: Download reg-actions binary
       shell: bash
       env:
-        # Pin to the same version the action was checked out at.
-        # `github.action_ref` is set automatically when invoked as `uses: reg-viz/reg-actions@vX`.
+        # Pin to the same version the action was checked out at, and download
+        # binaries from the same repository the action source came from — so
+        # forks work without patching this URL.
         REG_ACTIONS_REF: ${{ github.action_ref }}
+        REG_ACTIONS_REPO: ${{ github.action_repository }}
       run: |
         set -euo pipefail
         ver="${REG_ACTIONS_REF:-main}"
+        repo="${REG_ACTIONS_REPO:-reg-viz/reg-actions}"
         target='${{ steps.target.outputs.target }}'
         ext='${{ steps.target.outputs.ext }}'
-        base="https://github.com/reg-viz/reg-actions/releases/download/${ver}"
+        base="https://github.com/${repo}/releases/download/${ver}"
         url="${base}/reg-actions-${target}.tar.gz"
         sums="${base}/checksums.txt"
         workdir="$RUNNER_TEMP/reg-actions-bin"
