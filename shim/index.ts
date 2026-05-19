@@ -139,10 +139,22 @@ async function run(): Promise<void> {
   const binary = join(extracted, `reg-actions${ext}`);
   chmodSync(binary, 0o755);
 
-  // INPUT_* env vars are set automatically by the runner for JS actions.
+  // The runner exposes inputs as `INPUT_<NAME>` with hyphens preserved
+  // (e.g. `INPUT_GITHUB-TOKEN`), matching @actions/core's getInput() lookup.
+  // The Rust binary expects the underscore form (`INPUT_GITHUB_TOKEN`), which
+  // is what the old composite action.yml explicitly forwarded. Bridge the
+  // convention gap here so the binary sees the env vars it expects.
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    env[key] = value;
+    if (key.startsWith("INPUT_") && key.includes("-")) {
+      env[key.replace(/-/g, "_")] = value;
+    }
+  }
   // ACTIONS_RUNTIME_TOKEN / ACTIONS_RESULTS_URL flow through env inheritance —
   // this is the whole reason for the JS shim.
-  await runProcess(binary);
+  await runProcess(binary, [], { env });
 }
 
 run().catch((err: unknown) => {
