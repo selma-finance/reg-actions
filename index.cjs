@@ -37320,7 +37320,15 @@ async function run() {
   const extracted = await tc.extractTar(tarball, workdir);
   const binary = (0, import_node_path.join)(extracted, `reg-actions${ext}`);
   (0, import_node_fs.chmodSync)(binary, 493);
-  await runProcess(binary);
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === void 0) continue;
+    env[key] = value;
+    if (key.startsWith("INPUT_") && key.includes("-")) {
+      env[key.replace(/-/g, "_")] = value;
+    }
+  }
+  await runProcess(binary, [], { env });
 }
 run().catch((err) => {
   core.setFailed(err instanceof Error ? err.message : String(err));
