@@ -1,8 +1,16 @@
 import { createHash } from "node:crypto";
-import { createReadStream, chmodSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  createReadStream,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { DefaultArtifactClient } from "@actions/artifact";
 import * as core from "@actions/core";
 import * as actionsExec from "@actions/exec";
 import * as io from "@actions/io";
@@ -152,9 +160,47 @@ async function run(): Promise<void> {
       env[key.replace(/-/g, "_")] = value;
     }
   }
-  // ACTIONS_RUNTIME_TOKEN / ACTIONS_RESULTS_URL flow through env inheritance —
-  // this is the whole reason for the JS shim.
+
+  // Hand artifact upload off to @actions/artifact rather than the binary's
+  // own Twirl client — the latter is a Phase 2 stub that submits
+  // GITHUB_RUN_ID/ATTEMPT instead of decoding the real backend IDs from
+  // ACTIONS_RUNTIME_TOKEN's JWT, so its CreateArtifact call gets rejected.
+  // The binary writes a manifest at this path and skips its own upload when
+  // REG_ACTIONS_UPLOAD_MANIFEST is set.
+  const manifestPath = join(workdir, "upload-manifest.json");
+  if (existsSync(manifestPath)) rmSync(manifestPath);
+  env.REG_ACTIONS_UPLOAD_MANIFEST = manifestPath;
+
   await runProcess(binary, [], { env });
+
+  if (existsSync(manifestPath)) {
+    await uploadFromManifest(manifestPath);
+  }
+}
+
+type UploadManifest = {
+  name: string;
+  workspace_root: string;
+  files: string[];
+  retention_days: number;
+};
+
+async function uploadFromManifest(path: string): Promise<void> {
+  const manifest = JSON.parse(readFileSync(path, "utf8")) as UploadManifest;
+  if (manifest.files.length === 0) {
+    core.warning("upload manifest empty; nothing to upload");
+    return;
+  }
+  const client = new DefaultArtifactClient();
+  const { id, size } = await client.uploadArtifact(
+    manifest.name,
+    manifest.files,
+    manifest.workspace_root,
+    { retentionDays: manifest.retention_days },
+  );
+  core.info(
+    `uploaded artifact ${manifest.name}: id=${id ?? "<none>"} size=${size ?? 0} files=${manifest.files.length}`,
+  );
 }
 
 run().catch((err: unknown) => {

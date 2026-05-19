@@ -209,18 +209,47 @@ async fn compare_and_upload(client: &ApiClient, config: &Config) -> Result<Compa
     );
 
     let files = collect_files(&ws);
-    let upload = client
-        .artifact
-        .upload_artifact(&config.artifact_name, &files, &ws)
-        .await;
-    let artifact_id = match upload {
-        Ok(r) => {
-            tracing::info!(id = ?r.id, size = r.size, "uploaded artifact");
-            r.id
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "upload_artifact failed");
+    let artifact_id = match std::env::var("REG_ACTIONS_UPLOAD_MANIFEST") {
+        Ok(manifest_path) if !manifest_path.is_empty() => {
+            // Hand artifact upload off to the JS shim, which uses
+            // @actions/artifact and correctly extracts the Twirl backend IDs
+            // from ACTIONS_RUNTIME_TOKEN's JWT claims (this binary's own
+            // CreateArtifact call is a Phase 2 stub that submits
+            // GITHUB_RUN_ID/ATTEMPT instead and gets rejected).
+            let manifest = serde_json::json!({
+                "name": &config.artifact_name,
+                "workspace_root": &ws,
+                "files": &files,
+                "retention_days": config.retention_days,
+            });
+            fs::write(
+                &manifest_path,
+                serde_json::to_string_pretty(&manifest)
+                    .context("serialize upload manifest")?,
+            )
+            .with_context(|| format!("write upload manifest to {manifest_path}"))?;
+            tracing::info!(
+                path = %manifest_path,
+                file_count = files.len(),
+                "wrote upload manifest; deferring upload to JS shim",
+            );
             None
+        }
+        _ => {
+            let upload = client
+                .artifact
+                .upload_artifact(&config.artifact_name, &files, &ws)
+                .await;
+            match upload {
+                Ok(r) => {
+                    tracing::info!(id = ?r.id, size = r.size, "uploaded artifact");
+                    r.id
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "upload_artifact failed");
+                    None
+                }
+            }
         }
     };
 
