@@ -10,7 +10,9 @@
     "package:worker": "esbuild node_modules/@bokuweb/reg-cli-wasm/dist/worker.cjs --bundle --platform=node --format=cjs --outfile=dist/lib/worker.cjs",
     "package:wasm": "cp node_modules/@bokuweb/reg-cli-wasm/dist/shared/reg.wasm dist/lib/reg.wasm",
     "package:main": "esbuild src/main.ts --bundle --platform=node --format=cjs --outfile=dist/lib/index.cjs",
-    "package": "npm run package:entry && npm run package:worker && npm run package:main && npm run package:wasm"
+    "package": "npm run package:entry && npm run package:worker && npm run package:main && npm run package:wasm",
+    "build:shim": "esbuild shim/index.ts --bundle --platform=node --target=node24 --format=cjs --outfile=dist/index.cjs",
+    "typecheck:shim": "tsc --noEmit -p shim/tsconfig.json"
   },
   "repository": {
     "type": "git",
